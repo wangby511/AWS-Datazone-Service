@@ -11,12 +11,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 import software.amazon.awssdk.enhanced.dynamodb.Key;
-import software.amazon.awssdk.enhanced.dynamodb.model.GetItemEnhancedRequest;
 
 import java.util.Collections;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -25,54 +25,65 @@ class GetDomainTest {
 
     @Mock
     private DynamoDbTable<Domain> mockTable;
-    @Mock
-    private ObjectMapper mockObjectMapper;
-    @Mock
-    private APIGatewayProxyRequestEvent mockRequest;
+    private ObjectMapper objectMapper = new ObjectMapper();
+    private GetDomain handler;
     
-    private GetDomain getDomainHandler;
-    private static final String TEST_DOMAIN_ID = "dzd-_testdomainid";
+    private static final String VALID_DOMAIN_ID = "dzd-123456789012345678901234567890123456";
 
     @BeforeEach
     void setUp() {
-        getDomainHandler = new GetDomain(mockTable, mockObjectMapper);
+        handler = new GetDomain(mockTable, objectMapper);
     }
 
     @Test
-    void handle_Success_ShouldReturn200() throws Exception {
+    void testSuccessfulRetrieval() throws Exception {
         Domain domain = new Domain();
-        domain.setIdentifier(TEST_DOMAIN_ID);
-        domain.setName("TestDomain");
+        domain.setIdentifier(VALID_DOMAIN_ID);
+        domain.setName("Test Domain");
 
-        when(mockRequest.getPathParameters()).thenReturn(Map.of("domainId", TEST_DOMAIN_ID));
-        when(mockTable.getItem(any(GetItemEnhancedRequest.class))).thenReturn(domain);
-        when(mockObjectMapper.writeValueAsString(domain)).thenReturn("{\"identifier\":\"" + TEST_DOMAIN_ID + "\"}");
+        when(mockTable.getItem(any(Key.class))).thenReturn(domain);
 
-        APIGatewayProxyResponseEvent response = getDomainHandler.handle(mockRequest);
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("identifier", VALID_DOMAIN_ID));
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(200, response.getStatusCode());
-        verify(mockTable).getItem(argThat(req -> req.key().partitionKeyValue().s().equals(TEST_DOMAIN_ID)));
+        assertTrue(response.getBody().contains(VALID_DOMAIN_ID));
     }
 
     @Test
-    void handle_DomainNotFound_ShouldReturn404() {
-        when(mockRequest.getPathParameters()).thenReturn(Map.of("domainId", TEST_DOMAIN_ID));
-        when(mockTable.getItem(any(GetItemEnhancedRequest.class))).thenReturn(null);
+    void testMissingIdentifierReturns400() {
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Collections.emptyMap());
 
-        APIGatewayProxyResponseEvent response = getDomainHandler.handle(mockRequest);
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+
+        assertEquals(400, response.getStatusCode());
+        assertEquals("Missing identifier.", response.getBody());
+    }
+
+    @Test
+    void testInvalidIdentifierFormatReturns400() {
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("identifier", "invalid-format-id"));
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+
+        assertEquals(400, response.getStatusCode());
+        assertEquals("Invalid identifier format.", response.getBody());
+    }
+
+    @Test
+    void testDomainNotFoundReturns404() {
+        when(mockTable.getItem(any(Key.class))).thenReturn(null);
+
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("identifier", VALID_DOMAIN_ID));
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(404, response.getStatusCode());
         assertEquals("Domain not found.", response.getBody());
-    }
-
-    @Test
-    void handle_MissingPathParameter_ShouldReturn400() {
-        when(mockRequest.getPathParameters()).thenReturn(Collections.emptyMap());
-
-        APIGatewayProxyResponseEvent response = getDomainHandler.handle(mockRequest);
-
-        assertEquals(400, response.getStatusCode());
-        assertEquals("Missing domainId.", response.getBody());
-        verify(mockTable, never()).getItem(any(Key.class));
     }
 }

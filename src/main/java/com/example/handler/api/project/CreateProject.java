@@ -1,54 +1,59 @@
 package com.example.handler.api.project;
 
 import com.example.handler.api.RouteHandler;
-import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
-import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.example.model.Project;
+import com.example.dto.CreateProjectRequest;
 import com.example.utils.IdUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 import java.util.Map;
 
 public class CreateProject implements RouteHandler {
-    private final DynamoDbTable<Project> table;
-    private final ObjectMapper objectMapper;
+    
+    private final DynamoDbTable<Project> projectTable; 
+    private final ObjectMapper mapper;
 
-    public CreateProject(DynamoDbTable<Project> table, ObjectMapper objectMapper) {
-        this.table = table;
-        this.objectMapper = objectMapper;
-    }
-
-    static class CreateProjectRequest {
-        public String name;
-        public String description; // Optional parameter
+    public CreateProject(DynamoDbTable<Project> projectTable, ObjectMapper mapper) { 
+        this.projectTable = projectTable; 
+        this.mapper = mapper; 
     }
 
     @Override
     public APIGatewayProxyResponseEvent handle(APIGatewayProxyRequestEvent request) {
         try {
             Map<String, String> pathParams = request.getPathParameters();
-            // Path parameter name {domainIdentifier}
             String domainIdentifier = (pathParams != null) ? pathParams.get("domainIdentifier") : null;
-            if (domainIdentifier == null) return new APIGatewayProxyResponseEvent().withStatusCode(400).withBody("Missing domainIdentifier.");
-
-            CreateProjectRequest reqBody = objectMapper.readValue(request.getBody(), CreateProjectRequest.class);
+            if (domainIdentifier == null) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(400)
+                        .withBody("Missing domainIdentifier.");
+            }
             
-            if (reqBody.name == null || reqBody.name.isEmpty()) return new APIGatewayProxyResponseEvent().withStatusCode(400).withBody("Missing project name.");
+            CreateProjectRequest reqBody = mapper.readValue(request.getBody(), CreateProjectRequest.class);
+            if (reqBody.getName() == null || reqBody.getName().isEmpty()) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(400)
+                        .withBody("Missing project name.");
+            }
 
-            // 随机生成 Project ID
-            String projectId = IdUtils.generateProjectId();
-
-            Project project = new Project();
-            project.setId(projectId);
-            project.setDomainIdentifier(domainIdentifier);
-            project.setName(reqBody.name);
-            project.setDescription(reqBody.description); // Set description
+            Project project = Project.builder()
+                .id(IdUtils.generateProjectId())
+                .domainIdentifier(domainIdentifier)
+                .name(reqBody.getName())
+                .description(reqBody.getDescription())
+                .build();
             
-            table.putItem(project);
-            return new APIGatewayProxyResponseEvent().withStatusCode(201).withBody(objectMapper.writeValueAsString(project));
-        } catch (Exception e) {
-            e.printStackTrace();
-            return new APIGatewayProxyResponseEvent().withStatusCode(500).withBody("Error creating project: " + e.getMessage());
+            projectTable.putItem(project);
+            
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(201)
+                    .withBody(mapper.writeValueAsString(project));
+        } catch (Exception e) { 
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(500)
+                    .withBody("Error creating project: " + e.getMessage()); 
         }
     }
 }

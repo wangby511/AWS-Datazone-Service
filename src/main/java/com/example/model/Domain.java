@@ -3,15 +3,23 @@ package com.example.model;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbBean;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbPartitionKey;
 import lombok.Data;
+import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
-@Data
 @DynamoDbBean
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class Domain {
-    private String identifier; // Primary Key
-    private String name;
-    private String description; // Optional parameter
-    private String domainExecutionRole; // IAM Role ARN
 
     @DynamoDbPartitionKey
-    public String getIdentifier() { return identifier; }
+    private String identifier;
+
+    private String name;
+
+    private String description;
+
+    private String domainExecutionRole;
 }

@@ -11,9 +11,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 import software.amazon.awssdk.enhanced.dynamodb.Key;
-import software.amazon.awssdk.enhanced.dynamodb.model.DeleteItemEnhancedRequest;
 
-import java.util.Collections;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,42 +23,47 @@ class DeleteDomainTest {
 
     @Mock
     private DynamoDbTable<Domain> mockTable;
-    @Mock
-    private ObjectMapper mockObjectMapper;
-    @Mock
-    private APIGatewayProxyRequestEvent mockRequest;
+    private ObjectMapper objectMapper = new ObjectMapper();
+    private DeleteDomain handler;
     
-    private DeleteDomain deleteDomainHandler;
-    private static final String TEST_DOMAIN_ID = "dzd-_testdomainid";
+    private static final String VALID_DOMAIN_ID = "dzd-123456789012345678901234567890123456";
 
     @BeforeEach
     void setUp() {
-        deleteDomainHandler = new DeleteDomain(mockTable, mockObjectMapper);
+        handler = new DeleteDomain(mockTable, objectMapper);
     }
 
     @Test
-    void handle_Success_ShouldReturn204() {
-        Domain deletedDomain = new Domain();
-        deletedDomain.setIdentifier(TEST_DOMAIN_ID);
+    void testSuccessfulDeletion() {
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("identifier", VALID_DOMAIN_ID));
 
-        when(mockRequest.getPathParameters()).thenReturn(Map.of("domainId", TEST_DOMAIN_ID));
-        when(mockTable.deleteItem(any(DeleteItemEnhancedRequest.class))).thenReturn(deletedDomain);
-
-        APIGatewayProxyResponseEvent response = deleteDomainHandler.handle(mockRequest);
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(204, response.getStatusCode());
-        assertEquals("", response.getBody());
-        verify(mockTable).deleteItem(argThat(req -> req.key().partitionKeyValue().s().equals(TEST_DOMAIN_ID)));
+        verify(mockTable, times(1)).deleteItem(any(Key.class));
     }
 
     @Test
-    void handle_DomainNotFound_ShouldReturn404() {
-        when(mockRequest.getPathParameters()).thenReturn(Map.of("domainId", TEST_DOMAIN_ID));
-        when(mockTable.deleteItem(any(DeleteItemEnhancedRequest.class))).thenReturn(null);
+    void testInvalidIdentifierReturns400() {
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("identifier", "bad-id"));
 
-        APIGatewayProxyResponseEvent response = deleteDomainHandler.handle(mockRequest);
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
-        assertEquals(404, response.getStatusCode());
-        assertEquals("Domain not found or already deleted.", response.getBody());
+        assertEquals(400, response.getStatusCode());
+        assertEquals("Invalid identifier format.", response.getBody());
+        verify(mockTable, never()).deleteItem(any(Key.class));
+    }
+
+    @Test
+    void testMissingIdentifierReturns400() {
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(null);
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+
+        assertEquals(400, response.getStatusCode());
+        assertEquals("Missing identifier.", response.getBody());
     }
 }

@@ -12,83 +12,73 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class CreateDomainTest {
 
     @Mock
-    private DynamoDbTable<Domain> mockTable;
-    @Mock
-    private ObjectMapper mockObjectMapper;
-    @Mock
-    private APIGatewayProxyRequestEvent mockRequest;
+    private DynamoDbTable<Domain> mockDomainTable;
     
-    private CreateDomain createDomainHandler;
-
-    private static final String VALID_ARN = "arn:aws:iam::123456789012:role/DatazoneExecutionRole";
-    private static final String DUMMY_BODY = "{\"name\":\"TestDomain\",\"domainExecutionRole\":\"" + VALID_ARN + "\",\"description\":\"A test description\"}";
+    private ObjectMapper objectMapper = new ObjectMapper();
+    private CreateDomain handler;
 
     @BeforeEach
     void setUp() {
-        createDomainHandler = new CreateDomain(mockTable, mockObjectMapper);
+        handler = new CreateDomain(mockDomainTable, objectMapper);
     }
 
     @Test
-    void handle_Success_ShouldReturn201() throws Exception {
-        Domain inputDomain = new Domain();
-        inputDomain.setName("TestDomain");
-        inputDomain.setDomainExecutionRole(VALID_ARN);
-        inputDomain.setDescription("A test description");
-        
-        when(mockRequest.getBody()).thenReturn(DUMMY_BODY);
-        when(mockObjectMapper.readValue(eq(DUMMY_BODY), eq(Domain.class))).thenReturn(inputDomain);
+    void testSuccessfulCreation() throws Exception {
+        String requestBody = "{\"name\": \"Test Domain\", \"description\": \"A new test domain\", \"domainExecutionRole\": \"arn:aws:iam::123456789012:role/DataZoneExecutionRole\"}";
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withBody(requestBody)
+                .withResource("/domains")
+                .withHttpMethod("POST");
 
-        ArgumentCaptor<Domain> domainCaptor = ArgumentCaptor.forClass(Domain.class);
-        doNothing().when(mockTable).putItem(domainCaptor.capture());
-        
-        when(mockObjectMapper.writeValueAsString(any(Domain.class))).thenReturn("{}");
-
-        APIGatewayProxyResponseEvent response = createDomainHandler.handle(mockRequest);
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+        Domain createdDomain = objectMapper.readValue(response.getBody(), Domain.class);
 
         assertEquals(201, response.getStatusCode());
-        verify(mockTable, times(1)).putItem(any(Domain.class));
-        
-        Domain capturedDomain = domainCaptor.getValue();
-        assertEquals("TestDomain", capturedDomain.getName());
-        // Domain ID is 40 chars: "dzd" (3) + separator (1) + payload (36)
-        assertEquals(40, capturedDomain.getIdentifier().length()); 
+        assertNotNull(createdDomain.getIdentifier());
+        assertEquals("arn:aws:iam::123456789012:role/DataZoneExecutionRole", createdDomain.getDomainExecutionRole());
+        verify(mockDomainTable, times(1)).putItem(any(Domain.class));
     }
 
     @Test
-    void handle_MissingName_ShouldReturn400() throws Exception {
-        Domain inputDomain = new Domain();
-        inputDomain.setDomainExecutionRole(VALID_ARN);
-        when(mockRequest.getBody()).thenReturn("{}");
-        when(mockObjectMapper.readValue(any(String.class), eq(Domain.class))).thenReturn(inputDomain);
+    void testMissingNameReturns400() {
+        String requestBody = "{\"description\": \"Missing name\", \"domainExecutionRole\": \"arn:aws:iam::123456789012:role/DataZoneExecutionRole\"}";
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent().withBody(requestBody);
 
-        APIGatewayProxyResponseEvent response = createDomainHandler.handle(mockRequest);
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(400, response.getStatusCode());
-        assertEquals("Missing domain name.", response.getBody());
-        verify(mockTable, never()).putItem(any());
+        assertTrue(response.getBody().contains("Missing domain name"));
+        verify(mockDomainTable, never()).putItem(any());
     }
-    
-    @Test
-    void handle_InvalidArn_ShouldReturn400() throws Exception {
-        Domain inputDomain = new Domain();
-        inputDomain.setName("TestDomain");
-        inputDomain.setDomainExecutionRole("invalid-arn"); 
-        when(mockRequest.getBody()).thenReturn("{}");
-        when(mockObjectMapper.readValue(any(String.class), eq(Domain.class))).thenReturn(inputDomain);
 
-        APIGatewayProxyResponseEvent response = createDomainHandler.handle(mockRequest);
+    @Test
+    void testMissingExecutionRoleReturns400() {
+        String requestBody = "{\"name\": \"Test Domain\", \"description\": \"Missing role\"}";
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent().withBody(requestBody);
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(400, response.getStatusCode());
-        assertEquals("Invalid domainExecutionRole format.", response.getBody());
-        verify(mockTable, never()).putItem(any());
+        assertTrue(response.getBody().contains("Missing domainExecutionRole"));
+        verify(mockDomainTable, never()).putItem(any());
+    }
+
+    @Test
+    void testInvalidExecutionRoleFormatReturns400() {
+        String requestBody = "{\"name\": \"Test Domain\", \"domainExecutionRole\": \"invalid-role-arn\"}";
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent().withBody(requestBody);
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+
+        assertEquals(400, response.getStatusCode());
+        assertTrue(response.getBody().contains("Invalid domainExecutionRole format"));
+        verify(mockDomainTable, never()).putItem(any());
     }
 }

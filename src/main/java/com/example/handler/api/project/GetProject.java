@@ -1,21 +1,23 @@
 package com.example.handler.api.project;
 
 import com.example.handler.api.RouteHandler;
+import com.example.model.Project;
+import com.example.constant.Constants;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
-import com.example.model.Project;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 import software.amazon.awssdk.enhanced.dynamodb.Key;
 import java.util.Map;
 
 public class GetProject implements RouteHandler {
-    private final DynamoDbTable<Project> table;
-    private final ObjectMapper objectMapper;
+    
+    private final DynamoDbTable<Project> projectTable; 
+    private final ObjectMapper mapper;
 
-    public GetProject(DynamoDbTable<Project> table, ObjectMapper objectMapper) {
-        this.table = table;
-        this.objectMapper = objectMapper;
+    public GetProject(DynamoDbTable<Project> projectTable, ObjectMapper mapper) { 
+        this.projectTable = projectTable; 
+        this.mapper = mapper; 
     }
 
     @Override
@@ -23,28 +25,39 @@ public class GetProject implements RouteHandler {
         try {
             Map<String, String> pathParams = request.getPathParameters();
             String domainIdentifier = (pathParams != null) ? pathParams.get("domainIdentifier") : null;
-            // Path parameter name {projectId}
-            String projectId = (pathParams != null) ? pathParams.get("projectId") : null; 
+            String identifier = (pathParams != null) ? pathParams.get("identifier") : null; // Project ID
             
-            if (domainIdentifier == null || projectId == null) {
-                return new APIGatewayProxyResponseEvent().withStatusCode(400).withBody("Missing ID parameters.");
+            if (domainIdentifier == null || identifier == null) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(400)
+                        .withBody("Missing ID parameters.");
+            }
+            if (!identifier.matches(Constants.PROJECT_ID_REGEX)) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(400)
+                        .withBody("Invalid project identifier format.");
             }
 
-            Project project = table.getItem(r -> r.key(Key.builder().partitionValue(projectId).build()));
-
+            Project project = projectTable.getItem(Key.builder().partitionValue(identifier).build());
+            
             if (project == null) {
-                return new APIGatewayProxyResponseEvent().withStatusCode(404).withBody("Project not found.");
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(404)
+                        .withBody("Project not found.");
+            }
+            if (!project.getDomainIdentifier().equals(domainIdentifier)) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(404)
+                        .withBody("Project not found in this domain.");
             }
             
-            // 确保 Project 属于该 Domain
-            if (!domainIdentifier.equals(project.getDomainIdentifier())) {
-                 return new APIGatewayProxyResponseEvent().withStatusCode(404).withBody("Project not found in this domain.");
-            }
-
-            return new APIGatewayProxyResponseEvent().withStatusCode(200).withBody(objectMapper.writeValueAsString(project));
-        } catch (Exception e) {
-            e.printStackTrace();
-            return new APIGatewayProxyResponseEvent().withStatusCode(500).withBody("Error retrieving project: " + e.getMessage());
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(200)
+                    .withBody(mapper.writeValueAsString(project));
+        } catch (Exception e) { 
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(500)
+                    .withBody("Error retrieving project: " + e.getMessage()); 
         }
     }
 }

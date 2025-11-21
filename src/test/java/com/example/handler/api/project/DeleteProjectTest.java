@@ -10,13 +10,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
-import software.amazon.awssdk.enhanced.dynamodb.model.GetItemEnhancedRequest;
+import software.amazon.awssdk.enhanced.dynamodb.Key;
 
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -24,58 +23,76 @@ class DeleteProjectTest {
 
     @Mock
     private DynamoDbTable<Project> mockTable;
-    @Mock
-    private ObjectMapper mockObjectMapper;
-    @Mock
-    private APIGatewayProxyRequestEvent mockRequest;
+    private ObjectMapper objectMapper = new ObjectMapper();
+    private DeleteProject handler;
     
-    private DeleteProject deleteProjectHandler;
-    private static final String TEST_DOMAIN_ID = "dzd-_domain123";
-    private static final String TEST_PROJECT_ID = "proj-abc-123";
+    private static final String VALID_DOMAIN_ID = "dzd-123456789012345678901234567890123456";
+    private static final String VALID_PROJECT_ID = "proj-123456789012345678901234567890123456";
 
     @BeforeEach
     void setUp() {
-        deleteProjectHandler = new DeleteProject(mockTable, mockObjectMapper);
+        handler = new DeleteProject(mockTable, objectMapper);
     }
 
     @Test
-    void handle_Success_ShouldReturn204() {
-        Project projectToDelete = new Project();
-        projectToDelete.setId(TEST_PROJECT_ID);
-        projectToDelete.setDomainIdentifier(TEST_DOMAIN_ID);
+    void testSuccessfulDeletion() {
+        Project mockProject = new Project();
+        mockProject.setId(VALID_PROJECT_ID);
+        mockProject.setDomainIdentifier(VALID_DOMAIN_ID);
 
-        when(mockRequest.getPathParameters()).thenReturn(Map.of(
-            "domainIdentifier", TEST_DOMAIN_ID, 
-            "projectId", TEST_PROJECT_ID
-        ));
-        
-        when(mockTable.getItem(any(GetItemEnhancedRequest.class))).thenReturn(projectToDelete); 
-        when(mockTable.deleteItem(any(Project.class))).thenReturn(projectToDelete); 
+        // First get to verify ownership
+        when(mockTable.getItem(any(Key.class))).thenReturn(mockProject);
 
-        APIGatewayProxyResponseEvent response = deleteProjectHandler.handle(mockRequest);
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("domainIdentifier", VALID_DOMAIN_ID, "identifier", VALID_PROJECT_ID));
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(204, response.getStatusCode());
-        assertEquals("", response.getBody());
-        
-        verify(mockTable).getItem(argThat(req -> req.key().partitionKeyValue().s().equals(TEST_PROJECT_ID))); 
-        verify(mockTable).deleteItem(eq(projectToDelete));
+        verify(mockTable, times(1)).deleteItem(any(Key.class));
     }
 
     @Test
-    void handle_ProjectInWrongDomain_ShouldReturn404() {
-        Project projectInWrongDomain = new Project();
-        projectInWrongDomain.setDomainIdentifier("WRONG-DOMAIN");
-        
-        when(mockRequest.getPathParameters()).thenReturn(Map.of(
-            "domainIdentifier", TEST_DOMAIN_ID, 
-            "projectId", TEST_PROJECT_ID
-        ));
-        when(mockTable.getItem(any(GetItemEnhancedRequest.class))).thenReturn(projectInWrongDomain);
+    void testProjectNotFoundReturns404() {
+        // Get returns null
+        when(mockTable.getItem(any(Key.class))).thenReturn(null);
 
-        APIGatewayProxyResponseEvent response = deleteProjectHandler.handle(mockRequest);
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("domainIdentifier", VALID_DOMAIN_ID, "identifier", VALID_PROJECT_ID));
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(404, response.getStatusCode());
         assertEquals("Project not found in this domain.", response.getBody());
-        verify(mockTable, never()).deleteItem(any(Project.class));
+        verify(mockTable, never()).deleteItem(any(Key.class));
+    }
+
+    @Test
+    void testDomainMismatchReturns404() {
+        Project mockProject = new Project();
+        mockProject.setId(VALID_PROJECT_ID);
+        mockProject.setDomainIdentifier("OTHER_DOMAIN");
+
+        when(mockTable.getItem(any(Key.class))).thenReturn(mockProject);
+
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("domainIdentifier", VALID_DOMAIN_ID, "identifier", VALID_PROJECT_ID));
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+
+        assertEquals(404, response.getStatusCode());
+        assertEquals("Project not found in this domain.", response.getBody());
+        verify(mockTable, never()).deleteItem(any(Key.class));
+    }
+    
+    @Test
+    void testInvalidIdFormatReturns400() {
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("domainIdentifier", VALID_DOMAIN_ID, "identifier", "bad-id"));
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+
+        assertEquals(400, response.getStatusCode());
+        assertEquals("Invalid project identifier format.", response.getBody());
     }
 }

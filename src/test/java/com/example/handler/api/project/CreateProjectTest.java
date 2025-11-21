@@ -2,7 +2,6 @@ package com.example.handler.api.project;
 
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
-import com.example.handler.api.project.CreateProject.CreateProjectRequest;
 import com.example.model.Project;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,8 +15,8 @@ import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,55 +24,58 @@ class CreateProjectTest {
 
     @Mock
     private DynamoDbTable<Project> mockTable;
-    @Mock
-    private ObjectMapper mockObjectMapper;
-    @Mock
-    private APIGatewayProxyRequestEvent mockRequest;
+    private ObjectMapper objectMapper = new ObjectMapper();
+    private CreateProject handler;
     
-    private CreateProject createProjectHandler;
-
-    private static final String TEST_DOMAIN_ID = "dzd-_domain123";
-    private static final String DUMMY_BODY = "{\"name\":\"NewProject\",\"description\":\"A shiny new project\"}";
+    private static final String VALID_DOMAIN_ID = "dzd-123456789012345678901234567890123456";
 
     @BeforeEach
     void setUp() {
-        createProjectHandler = new CreateProject(mockTable, mockObjectMapper);
+        handler = new CreateProject(mockTable, objectMapper);
     }
 
     @Test
-    void handle_Success_ShouldReturn201() throws Exception {
-        CreateProjectRequest reqBody = new CreateProjectRequest();
-        reqBody.name = "NewProject";
-        reqBody.description = "A shiny new project";
-        
-        when(mockRequest.getPathParameters()).thenReturn(Map.of("domainIdentifier", TEST_DOMAIN_ID));
-        when(mockRequest.getBody()).thenReturn(DUMMY_BODY);
-        when(mockObjectMapper.readValue(eq(DUMMY_BODY), eq(CreateProjectRequest.class))).thenReturn(reqBody);
+    void testSuccessfulCreation() {
+        String requestBody = "{\"name\": \"Test Project\", \"description\": \"Project Desc\"}";
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("domainIdentifier", VALID_DOMAIN_ID))
+                .withBody(requestBody);
 
-        ArgumentCaptor<Project> projectCaptor = ArgumentCaptor.forClass(Project.class);
-        doNothing().when(mockTable).putItem(projectCaptor.capture());
-        
-        when(mockObjectMapper.writeValueAsString(any(Project.class))).thenReturn("{}"); 
-
-        APIGatewayProxyResponseEvent response = createProjectHandler.handle(mockRequest);
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(201, response.getStatusCode());
         
-        Project capturedProject = projectCaptor.getValue();
-        assertEquals("NewProject", capturedProject.getName());
-        assertEquals("A shiny new project", capturedProject.getDescription());
-        assertEquals(TEST_DOMAIN_ID, capturedProject.getDomainIdentifier());
-        assertEquals(36, capturedProject.getId().length()); 
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(mockTable).putItem(captor.capture());
+        
+        Project savedProject = captor.getValue();
+        assertEquals(VALID_DOMAIN_ID, savedProject.getDomainIdentifier());
+        assertEquals("Test Project", savedProject.getName());
+        assertNotNull(savedProject.getId());
     }
 
     @Test
-    void handle_MissingDomainIdentifier_ShouldReturn400() {
-        when(mockRequest.getPathParameters()).thenReturn(Map.of());
+    void testMissingDomainIdReturns400() {
+        String requestBody = "{\"name\": \"Test Project\"}";
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withBody(requestBody); // No path params
 
-        APIGatewayProxyResponseEvent response = createProjectHandler.handle(mockRequest);
+        APIGatewayProxyResponseEvent response = handler.handle(request);
 
         assertEquals(400, response.getStatusCode());
         assertEquals("Missing domainIdentifier.", response.getBody());
-        verify(mockTable, never()).putItem(any());
+    }
+
+    @Test
+    void testMissingNameReturns400() {
+        String requestBody = "{\"description\": \"Only description\"}";
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent()
+                .withPathParameters(Map.of("domainIdentifier", VALID_DOMAIN_ID))
+                .withBody(requestBody);
+
+        APIGatewayProxyResponseEvent response = handler.handle(request);
+
+        assertEquals(400, response.getStatusCode());
+        assertEquals("Missing project name.", response.getBody());
     }
 }

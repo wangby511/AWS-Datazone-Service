@@ -1,42 +1,51 @@
 package com.example.handler.api.domain;
 
 import com.example.handler.api.RouteHandler;
+import com.example.model.Domain;
+import com.example.constant.Constants;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
-import com.example.model.Domain;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable;
 import software.amazon.awssdk.enhanced.dynamodb.Key;
 import java.util.Map;
 
 public class DeleteDomain implements RouteHandler {
-    private final DynamoDbTable<Domain> table;
-    private final ObjectMapper objectMapper;
+    
+    private final DynamoDbTable<Domain> domainTable; 
+    private final ObjectMapper mapper;
 
-    public DeleteDomain(DynamoDbTable<Domain> table, ObjectMapper objectMapper) {
-        this.table = table;
-        this.objectMapper = objectMapper;
+    public DeleteDomain(DynamoDbTable<Domain> domainTable, ObjectMapper mapper) { 
+        this.domainTable = domainTable; 
+        this.mapper = mapper; 
     }
 
     @Override
     public APIGatewayProxyResponseEvent handle(APIGatewayProxyRequestEvent request) {
         try {
             Map<String, String> pathParams = request.getPathParameters();
-            String domainId = (pathParams != null) ? pathParams.get("domainId") : null;
+            String identifier = (pathParams != null) ? pathParams.get("identifier") : null;
             
-            if (domainId == null) return new APIGatewayProxyResponseEvent().withStatusCode(400).withBody("Missing domainId.");
-
-            // WARNING: A real application would first check for associated projects and delete them (cascading delete).
-            Domain deletedDomain = table.deleteItem(r -> r.key(Key.builder().partitionValue(domainId).build()));
-
-            if (deletedDomain == null) {
-                return new APIGatewayProxyResponseEvent().withStatusCode(404).withBody("Domain not found or already deleted.");
+            if (identifier == null) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(400)
+                        .withBody("Missing identifier.");
             }
-
-            return new APIGatewayProxyResponseEvent().withStatusCode(204).withBody("");
-        } catch (Exception e) {
-            e.printStackTrace();
-            return new APIGatewayProxyResponseEvent().withStatusCode(500).withBody("Error deleting domain: " + e.getMessage());
+            if (!identifier.matches(Constants.DOMAIN_ID_RULE_REFERENCE)) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(400)
+                        .withBody("Invalid identifier format.");
+            }
+            
+            domainTable.deleteItem(Key.builder().partitionValue(identifier).build());
+            
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(204)
+                    .withBody("");
+        } catch (Exception e) { 
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(500)
+                    .withBody("Error deleting domain: " + e.getMessage()); 
         }
     }
 }
